@@ -1,0 +1,43 @@
+services:
+  # -------------------------------------------------------------
+  # 1. Python AI Microservice (FastAPI + OpenCV + PaddleOCR)
+  # -------------------------------------------------------------
+  - type: web
+    name: legal-metrology-ai-python
+    env: docker
+    dockerfilePath: ./backend-python/Dockerfile
+    dockerContext: ./backend-python
+    plan: free
+    region: oregon
+    healthCheckPath: /
+
+  # -------------------------------------------------------------
+  # 2. Node.js Express API Gateway (JWT Auth + Legal Rule Engine)
+  # -------------------------------------------------------------
+  - type: web
+    name: legal-metrology-node-gateway
+    env: node
+    buildCommand: cd backend-node && npm install
+    startCommand: cd backend-node && npm start
+    plan: free
+    region: oregon
+    envVars:
+      - key: JWT_SECRET
+        value: legal_metrology_super_secret_jwt_key_2026
+      - key: PYTHON_AI_URL
+        value: https://legal-metrology-ai-python.onrender.com/api/v1/extract
+
+  # -------------------------------------------------------------
+  # 3. React.js PWA Frontend
+  # -------------------------------------------------------------
+  - type: static
+    name: legal-metrology-frontend
+    buildCommand: cd frontend-react && npm install && npm run build
+    staticPublishPath: ./frontend-react/build
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    envVars:
+      - key: REACT_APP_API_URL
+        value: https://legal-metrology-node-gateway.onrender.com/api/v1
