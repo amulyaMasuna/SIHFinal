@@ -4,7 +4,7 @@ services:
   # -------------------------------------------------------------
   - type: web
     name: legal-metrology-ai-python
-    env: docker
+    runtime: docker
     dockerfilePath: ./backend-python/Dockerfile
     dockerContext: ./backend-python
     plan: free
@@ -16,7 +16,7 @@ services:
   # -------------------------------------------------------------
   - type: web
     name: legal-metrology-node-gateway
-    env: node
+    runtime: node
     buildCommand: cd backend-node && npm install
     startCommand: cd backend-node && npm start
     plan: free
@@ -27,11 +27,12 @@ services:
       - key: PYTHON_AI_URL
         value: https://legal-metrology-ai-python.onrender.com/api/v1/extract
 
-# -------------------------------------------------------------
-# 3. React.js PWA Frontend (Static Site Root Key)
-# -------------------------------------------------------------
-staticSites:
-  - name: legal-metrology-frontend
+  # -------------------------------------------------------------
+  # 3. React.js PWA Frontend (Render Static Site)
+  # -------------------------------------------------------------
+  - type: web
+    name: legal-metrology-frontend
+    runtime: static
     buildCommand: cd frontend-react && npm install && npm run build
     staticPublishPath: ./frontend-react/build
     routes:
