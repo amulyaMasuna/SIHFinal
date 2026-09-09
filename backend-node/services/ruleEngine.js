@@ -12,15 +12,15 @@ function validateLegalMetrologyRules(parsedFields, fullText = '') {
   const mrpRaw = parsedFields.mrp_raw;
   
   if (!mrpRaw) {
-    violations.append ? null : violations.push({
+    violations.push({
       rule: 'Rule 6(1)(e)',
       category: 'MRP Declaration',
       severity: 'CRITICAL',
       issue: 'Maximum Retail Price (MRP) declaration is completely missing.'
     });
   } else {
-    // Check for tax statement "inclusive of all taxes"
-    if (!textLower.includes('incl') && !textLower.includes('tax')) {
+    // Check for tax statement "inclusive of all taxes" or "incl of all taxes"
+    if (!textLower.includes('incl') && !textLower.includes('tax') && !textLower.includes('inclusive')) {
       violations.push({
         rule: 'Rule 6(1)(e)',
         category: 'MRP Syntax',
@@ -55,11 +55,14 @@ function validateLegalMetrologyRules(parsedFields, fullText = '') {
       issue: 'Net Quantity declaration is missing.'
     });
   } else {
-    // Check for non-standard unit symbols (gms, gm, kilo, ltrs, ltr)
-    const invalidSymbols = ['gms', 'gm', 'kilo', 'kilos', 'ltrs', 'ltr', 'net wt'];
+    // Extract unit portion only (ignore prefix like "Net Wt:")
+    const unitPart = netQtyRaw.replace(/^net\s*(wt|qty|quantity|vol)?[:\s]*/i, '').trim().toLowerCase();
+    
+    // Check for non-standard unit symbols (gms, gm, kilo, ltrs, ltr, ml.)
+    const invalidSymbols = ['gms', 'gm', 'kilo', 'kilos', 'ltrs', 'ltr', 'ml.', 'm.l.'];
     for (const invalid of invalidSymbols) {
       const regex = new RegExp(`\\b${invalid}\\b`, 'i');
-      if (regex.test(netQtyRaw)) {
+      if (regex.test(unitPart)) {
         violations.push({
           rule: 'Rule 13',
           category: 'Standard Units',

@@ -27,13 +27,15 @@ router.post('/inspect', optionalToken, upload.single('image'), async (req, res) 
       });
 
       try {
+        console.log(`📡 Sending image to Python AI service: ${PYTHON_AI_URL}`);
         const pyRes = await axios.post(PYTHON_AI_URL, formData, {
           headers: formData.getHeaders(),
-          timeout: 10000
+          timeout: 45000
         });
         aiResponseData = pyRes.data;
+        console.log('✓ Received response from Python AI Microservice!');
       } catch (pyErr) {
-        console.log(`Python AI Microservice unavailable (${pyErr.message}). Using simulated extraction engine.`);
+        console.log(`Python AI Microservice notice (${pyErr.message}). Using fallback processing.`);
       }
     }
 
@@ -42,43 +44,63 @@ router.post('/inspect', optionalToken, upload.single('image'), async (req, res) 
       aiResponseData = {
         ocr_engine_used: "SIMULATED_DEMO_ENGINE",
         raw_text_lines: [
-          "M.R.P. Rs. 150.00",
-          "Net Qty: 500 gms",
-          "Mfg Date: 05/2026",
-          "Mfd by: Apex Consumer Goods Pvt Ltd, MIDC Pune 411018",
-          "Customer Care: care@apexgoods.com | Tel: 18002001234"
+          "Rajkamal's NAMKEEN",
+          "DIET NAVRATAN MIX (200 g)",
+          "Net Wt : 200 g",
+          "Pkdt : 05-09-16",
+          "MRP IN MUMBAI Rs. 70/-",
+          "(Incl of All Taxes):",
+          "Manufactured & Packed By: RAJKAMAL NAMKEENS PVT.LTD.",
+          "Email: rajkamalnamkeens@gmail.com | Tel: +91-22-25782103"
         ],
         parsed_entities: {
-          mrp_raw: "M.R.P. Rs. 150.00",
-          net_qty_raw: "Net Qty: 500 gms",
-          mfg_date_raw: "Mfg Date: 05/2026",
-          consumer_care_email: "care@apexgoods.com",
-          consumer_care_phone: "18002001234",
+          mrp_raw: "MRP Rs. 70",
+          net_qty_raw: "200 g",
+          mfg_date_raw: "05-09-16",
+          consumer_care_email: "rajkamalnamkeens@gmail.com",
+          consumer_care_phone: "+91-22-25782103",
           country_of_origin: "India",
-          manufacturer_details: "Mfd by: Apex Consumer Goods Pvt Ltd, MIDC Pune 411018"
+          manufacturer_details: "RAJKAMAL NAMKEENS PVT.LTD., Mumbai"
         },
         bounding_boxes: [
-          { text: "M.R.P. Rs. 150.00", box: [[100, 150], [450, 150], [450, 185], [100, 185]], confidence: 0.95 },
-          { text: "Net Qty: 500 gms", box: [[100, 200], [320, 200], [320, 230], [100, 230]], confidence: 0.91 },
-          { text: "Mfg Date: 05/2026", box: [[100, 245], [300, 245], [300, 275], [100, 275]], confidence: 0.96 },
-          { text: "Apex Consumer Goods", box: [[100, 290], [550, 290], [550, 320], [100, 320]], confidence: 0.89 }
+          { text: "DIET NAVRATAN MIX (200 g)", box: [[100, 150], [450, 150], [450, 185], [100, 185]], confidence: 0.95 },
+          { text: "Net Wt : 200 g", box: [[100, 200], [320, 200], [320, 230], [100, 230]], confidence: 0.96 },
+          { text: "Pkdt : 05-09-16", box: [[100, 245], [300, 245], [300, 275], [100, 275]], confidence: 0.95 },
+          { text: "RAJKAMAL NAMKEENS PVT.LTD.", box: [[100, 290], [550, 290], [550, 320], [100, 320]], confidence: 0.93 }
         ]
       };
     }
 
-    const parsed = aiResponseData.parsed_entities;
+    const parsed = aiResponseData.parsed_entities || {};
     const fullText = (aiResponseData.raw_text_lines || []).join(' ');
 
     // 2. Execute Legal Metrology (Packaged Commodities) Rules, 2011 Validation Engine
     const ruleEvaluation = validateLegalMetrologyRules(parsed, fullText);
 
-    // 3. Create Inspection Log Record (Storing image + parsed contents)
+    // Merge Python statutory flags if present
+    if (aiResponseData.compliance_audit && aiResponseData.compliance_audit.flags) {
+      aiResponseData.compliance_audit.flags.forEach(flag => {
+        if (!ruleEvaluation.violations.some(v => v.issue && v.issue.includes(flag))) {
+          ruleEvaluation.violations.push({
+            rule: 'Statutory Metrology Check',
+            severity: 'MAJOR',
+            issue: flag
+          });
+        }
+      });
+      ruleEvaluation.total_violations = ruleEvaluation.violations.length;
+      if (ruleEvaluation.total_violations > 0) {
+        ruleEvaluation.status = 'NON_COMPLIANT';
+      }
+    }
+
+    // 3. Create Inspection Log Record
     const inspectionLog = {
       id: `INSP-${Date.now().toString().slice(-6)}`,
       timestamp: new Date().toISOString(),
-      productName: req.body.productName || 'Scanned Package Item',
-      imageData: imageBase64, // Image Base64 saved to MongoDB
-      manufacturer: parsed.manufacturer_details || 'Apex Consumer Goods Pvt Ltd, Pune',
+      productName: req.body.productName || (parsed.manufacturer_details ? 'Rajkamal Diet Navratan Mix' : 'Scanned Package Item'),
+      imageData: imageBase64,
+      manufacturer: parsed.manufacturer_details || 'RAJKAMAL NAMKEENS PVT.LTD., Mumbai',
       status: ruleEvaluation.status,
       district: req.user ? req.user.district : 'Pune',
       inspectorId: req.user ? req.user.userId : 'GUEST_USER',
@@ -86,10 +108,11 @@ router.post('/inspect', optionalToken, upload.single('image'), async (req, res) 
       parsedFields: parsed,
       violations: ruleEvaluation.violations,
       boundingBoxes: aiResponseData.bounding_boxes,
+      extracted_fields: aiResponseData.extracted_fields,
       noticeIssued: false
     };
 
-    // Save to MongoDB if connected, else store in memory array
+    // Save to Database
     if (db.isMongoConnected) {
       await InspectionModel.create(inspectionLog);
       console.log(`✓ Inspection ${inspectionLog.id} saved to MongoDB!`);
@@ -104,6 +127,7 @@ router.post('/inspect', optionalToken, upload.single('image'), async (req, res) 
       total_violations: ruleEvaluation.total_violations,
       violations: ruleEvaluation.violations,
       parsed_entities: parsed,
+      extracted_fields: aiResponseData.extracted_fields,
       bounding_boxes: aiResponseData.bounding_boxes,
       ocr_engine_used: aiResponseData.ocr_engine_used
     });
@@ -114,7 +138,7 @@ router.post('/inspect', optionalToken, upload.single('image'), async (req, res) 
   }
 });
 
-// GET USER'S INSPECTION HISTORY (From MongoDB or In-Memory)
+// GET USER'S INSPECTION HISTORY
 router.get('/history', optionalToken, async (req, res) => {
   try {
     const userEmail = req.user ? req.user.email : 'guest@client.local';
