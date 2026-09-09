@@ -21,7 +21,7 @@ app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 // Root health check endpoint
 app.get('/', (req, res) => {
   res.json({
-    service: "SIH26034 Node.js Express API Gateway",
+    service: "LegalLens Node.js Express API Gateway",
     status: "ONLINE",
     timestamp: new Date().toISOString()
   });

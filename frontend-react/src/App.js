@@ -94,7 +94,7 @@ export default function App() {
 
       {/* Footer */}
       <footer class="bg-slate-950 border-t border-slate-800 text-center py-4 text-xs text-slate-500">
-        <p>SIH26034 • AI-Powered Legal Metrology Packaged Commodities System • Ministry of Consumer Affairs</p>
+        <p>LegalLens • AI-Powered Legal Metrology Packaged Commodities System • Ministry of Consumer Affairs</p>
       </footer>
 
       {/* Auth Modal */}

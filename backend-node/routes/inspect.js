@@ -42,11 +42,10 @@ router.post('/inspect', optionalToken, upload.single('image'), async (req, res) 
     // Dynamic Generic Fallback if Python microservice is unreachable
     if (!aiResponseData) {
       aiResponseData = {
-        ocr_engine_used: "GENERIC_PARSER",
+        ocr_engine_used: "PYTHON_SERVICE_UNREACHABLE",
         raw_text_lines: [
-          "Scanned Commodity Label",
-          "MRP: As printed on package",
-          "Net Qty: As declared on package"
+          `Notice: Python AI microservice was unreachable at ${PYTHON_AI_URL}.`,
+          "Ensure PYTHON_AI_URL environment variable is set on Render."
         ],
         parsed_entities: {
           mrp_raw: null,

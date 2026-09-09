@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 app = FastAPI(
-    title="SIH26034 Legal Metrology AI Microservice",
+    title="LegalLens AI Microservice",
     description="Advanced OpenCV Glare Removal + Dual-Pass PaddleOCR Spatial Proximity Engine"
 )
 
@@ -242,6 +242,13 @@ def process_spatial_label_pipeline(original_img, sharpened_img, img_bytes):
     if not extracted_data["Care_Phone"]:
         m = re.search(r'(1800\d{6,7}|\+?91[\-\s]?\d{2,5}[\-\s]?\d{6,8}|\d{3,5}[\-\s]?\d{6,8})', full_text)
         if m: extracted_data["Care_Phone"] = m.group(0)
+
+    if not extracted_data["Country_of_Origin"]:
+        m = re.search(r'(?:country\s*of\s*origin|made\s*in|origin)[:\.\s]*([A-Za-z]+)', full_text, re.I)
+        if m:
+            extracted_data["Country_of_Origin"] = m.group(1).strip()
+        elif re.search(r'\(INDIA\)|MADE IN INDIA|PRODUCT OF INDIA|\bINDIA\b', full_text, re.I):
+            extracted_data["Country_of_Origin"] = "India"
 
     if not extracted_data["Manufacturer_Identity"]:
         m = re.search(r'([A-Za-z0-9\s,\.\-]{5,60}\s*(?:Pvt|Ltd|Limited|Private|Industries|Goods|Foods))', full_text, re.I)

@@ -11,8 +11,8 @@ export default function Navbar({ user, onOpenAuth, onLogout, activeTab, setActiv
             ⚖️
           </div>
           <div>
-            <h1 class="text-lg font-bold text-white tracking-wide">Legal Metrology AI</h1>
-            <p class="text-xs text-slate-400">SIH26034 Automated Packaged Commodities Compliance System</p>
+            <h1 class="text-lg font-bold text-white tracking-wide">LegalLens</h1>
+            <p class="text-xs text-slate-400">Automated Packaged Commodities Compliance System</p>
           </div>
         </div>
 
