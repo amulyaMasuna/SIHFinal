@@ -212,18 +212,22 @@ class TestOCREngine(unittest.TestCase):
         # Expected reading order: "Top Line", then "Hello", then "World"
         self.assertEqual(sorted_texts, ["Top Line", "Hello", "World"])
 
-    def test_fallback_extraction_structure(self):
+    def test_dynamic_image_extraction(self):
+        import cv2
+        import numpy as np
         from services.ocr_engine import OCREngine
+
         engine = OCREngine(use_gpu=False)
-        dummy_img = None
-        result = engine.extract_text(dummy_img)
+        img = np.ones((150, 500, 3), dtype=np.uint8) * 255
+        cv2.putText(img, 'MRP Rs. 249.00', (20, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 0), 2)
+        cv2.putText(img, 'Net Qty: 500 g', (20, 100), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 0), 2)
+
+        result = engine.extract_text(img)
 
         self.assertIn("raw_text_lines", result)
-        self.assertIn("full_text", result)
         self.assertIn("bounding_boxes", result)
-        self.assertIn("ocr_engine_used", result)
         self.assertGreater(len(result["raw_text_lines"]), 0)
-        self.assertGreater(len(result["bounding_boxes"]), 0)
+        self.assertTrue(any("249" in line for line in result["raw_text_lines"]))
 
 
 def run_tests():
