@@ -1,24 +1,29 @@
 services:
   # -------------------------------------------------------------
-  # 1. Python AI Microservice (FastAPI + OpenCV + PaddleOCR)
+  # 1. Python AI Microservice (FastAPI + OpenCV Preprocessor)
   # -------------------------------------------------------------
   - type: web
     name: legal-metrology-ai-python
-    runtime: docker
-    dockerfilePath: ./backend-python/Dockerfile
-    dockerContext: ./backend-python
+    env: python
+    rootDir: backend-python
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
     plan: free
     region: oregon
     healthCheckPath: /
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.10.12
 
   # -------------------------------------------------------------
-  # 2. Node.js Express API Gateway (JWT Auth + Legal Rule Engine)
+  # 2. Node.js Express API Gateway (JWT Auth + Rules Engine)
   # -------------------------------------------------------------
   - type: web
     name: legal-metrology-node-gateway
-    runtime: node
-    buildCommand: cd backend-node && npm install
-    startCommand: cd backend-node && npm start
+    env: node
+    rootDir: backend-node
+    buildCommand: npm install
+    startCommand: npm start
     plan: free
     region: oregon
     envVars:
@@ -32,9 +37,10 @@ services:
   # -------------------------------------------------------------
   - type: web
     name: legal-metrology-frontend
-    runtime: static
-    buildCommand: cd frontend-react && npm install && npm run build
-    staticPublishPath: ./frontend-react/build
+    env: static
+    rootDir: frontend-react
+    buildCommand: npm install && npm run build
+    staticPublishPath: build
     routes:
       - type: rewrite
         source: /*

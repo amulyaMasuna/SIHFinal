@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const db = require('../config/db');
+const { db, InspectionModel } = require('../config/db');
 const { authenticateToken, requireRole } = require('../middleware/authMiddleware');
 const { generateLegalNoticePDF } = require('../services/pdfGenerator');
 const { dispatchLegalNoticeEmail } = require('../services/emailService');
@@ -10,14 +10,18 @@ router.use(authenticateToken);
 router.use(requireRole('LEGAL_METROLOGY_OFFICER'));
 
 // 1. GET FLAGGED CASES QUEUE
-router.get('/flagged-cases', (req, res) => {
+router.get('/flagged-cases', async (req, res) => {
   const officerDistrict = req.user.district || 'Pune';
-  
-  // Return non-compliant inspections in officer's jurisdiction
-  const flaggedCases = db.inspections.filter(i => 
-    i.status === 'NON_COMPLIANT' && 
-    (i.district === officerDistrict || officerDistrict === 'General' || i.district === 'Pune')
-  );
+  let flaggedCases = [];
+
+  if (db.isMongoConnected) {
+    flaggedCases = await InspectionModel.find({ status: 'NON_COMPLIANT' }).sort({ timestamp: -1 });
+  } else {
+    flaggedCases = db.inspections.filter(i => 
+      i.status === 'NON_COMPLIANT' && 
+      (i.district === officerDistrict || officerDistrict === 'General' || i.district === 'Pune')
+    );
+  }
 
   res.json({
     success: true,
@@ -31,7 +35,14 @@ router.get('/flagged-cases', (req, res) => {
 // 2. GENERATE LEGAL SHOW CAUSE NOTICE PDF (Section 36)
 router.get('/notice-pdf/:inspectionId', async (req, res) => {
   const { inspectionId } = req.params;
-  const inspection = db.inspections.find(i => i.id === inspectionId);
+  let inspection = null;
+
+  if (db.isMongoConnected) {
+    inspection = await InspectionModel.findOne({ id: inspectionId });
+  }
+  if (!inspection) {
+    inspection = db.inspections.find(i => i.id === inspectionId);
+  }
 
   if (!inspection) {
     return res.status(404).json({ error: 'Inspection record not found.' });
@@ -51,7 +62,14 @@ router.get('/notice-pdf/:inspectionId', async (req, res) => {
 // 3. AUTOMATED LEGAL NOTICE ISSUANCE TO MANUFACTURERS
 router.post('/issue-notice/:inspectionId', async (req, res) => {
   const { inspectionId } = req.params;
-  const inspection = db.inspections.find(i => i.id === inspectionId);
+  let inspection = null;
+
+  if (db.isMongoConnected) {
+    inspection = await InspectionModel.findOne({ id: inspectionId });
+  }
+  if (!inspection) {
+    inspection = db.inspections.find(i => i.id === inspectionId);
+  }
 
   if (!inspection) {
     return res.status(404).json({ error: 'Inspection record not found.' });
@@ -67,6 +85,14 @@ router.post('/issue-notice/:inspectionId', async (req, res) => {
     inspection.noticeIssued = true;
     inspection.noticeIssuedAt = new Date().toISOString();
     inspection.noticeIssuedBy = req.user.email;
+
+    if (db.isMongoConnected) {
+      await InspectionModel.updateOne({ id: inspectionId }, { 
+        noticeIssued: true,
+        noticeIssuedAt: inspection.noticeIssuedAt,
+        noticeIssuedBy: req.user.email
+      });
+    }
 
     res.json({
       success: true,

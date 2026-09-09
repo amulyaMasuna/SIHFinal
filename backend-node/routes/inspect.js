@@ -3,7 +3,7 @@ const router = express.Router();
 const multer = require('multer');
 const axios = require('axios');
 const FormData = require('form-data');
-const db = require('../config/db');
+const { db, InspectionModel } = require('../config/db');
 const { optionalToken } = require('../middleware/authMiddleware');
 const { validateLegalMetrologyRules } = require('../services/ruleEngine');
 
@@ -14,8 +14,11 @@ const PYTHON_AI_URL = process.env.PYTHON_AI_URL || 'http://localhost:8000/api/v1
 router.post('/inspect', optionalToken, upload.single('image'), async (req, res) => {
   try {
     let aiResponseData = null;
+    let imageBase64 = null;
 
     if (req.file) {
+      imageBase64 = `data:${req.file.mimetype};base64,${req.file.buffer.toString('base64')}`;
+
       // 1. Package image buffer into FormData to send to Python AI Microservice
       const formData = new FormData();
       formData.append('file', req.file.buffer, {
@@ -69,11 +72,12 @@ router.post('/inspect', optionalToken, upload.single('image'), async (req, res) 
     // 2. Execute Legal Metrology (Packaged Commodities) Rules, 2011 Validation Engine
     const ruleEvaluation = validateLegalMetrologyRules(parsed, fullText);
 
-    // 3. Create Inspection Log Record
+    // 3. Create Inspection Log Record (Storing image + parsed contents)
     const inspectionLog = {
       id: `INSP-${Date.now().toString().slice(-6)}`,
       timestamp: new Date().toISOString(),
       productName: req.body.productName || 'Scanned Package Item',
+      imageData: imageBase64, // Image Base64 saved to MongoDB
       manufacturer: parsed.manufacturer_details || 'Apex Consumer Goods Pvt Ltd, Pune',
       status: ruleEvaluation.status,
       district: req.user ? req.user.district : 'Pune',
@@ -85,7 +89,11 @@ router.post('/inspect', optionalToken, upload.single('image'), async (req, res) 
       noticeIssued: false
     };
 
-    // Save to Database
+    // Save to MongoDB if connected, else store in memory array
+    if (db.isMongoConnected) {
+      await InspectionModel.create(inspectionLog);
+      console.log(`✓ Inspection ${inspectionLog.id} saved to MongoDB!`);
+    }
     db.inspections.unshift(inspectionLog);
 
     // 4. Return Full Response to React Frontend
@@ -106,11 +114,21 @@ router.post('/inspect', optionalToken, upload.single('image'), async (req, res) 
   }
 });
 
-// GET USER'S INSPECTION HISTORY
-router.get('/history', optionalToken, (req, res) => {
-  const userEmail = req.user ? req.user.email : 'guest@client.local';
-  const history = db.inspections.filter(i => i.inspectorEmail === userEmail || i.inspectorId === 'GUEST_USER');
-  res.json({ history });
+// GET USER'S INSPECTION HISTORY (From MongoDB or In-Memory)
+router.get('/history', optionalToken, async (req, res) => {
+  try {
+    const userEmail = req.user ? req.user.email : 'guest@client.local';
+    let history = [];
+    
+    if (db.isMongoConnected) {
+      history = await InspectionModel.find({ inspectorEmail: userEmail }).sort({ timestamp: -1 });
+    } else {
+      history = db.inspections.filter(i => i.inspectorEmail === userEmail || i.inspectorId === 'GUEST_USER');
+    }
+    res.json({ history });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 module.exports = router;
