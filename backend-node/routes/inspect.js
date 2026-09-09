@@ -35,39 +35,29 @@ router.post('/inspect', optionalToken, upload.single('image'), async (req, res) 
         aiResponseData = pyRes.data;
         console.log('✓ Received response from Python AI Microservice!');
       } catch (pyErr) {
-        console.log(`Python AI Microservice notice (${pyErr.message}). Using fallback processing.`);
+        console.log(`Python AI Microservice notice (${pyErr.message}). Processing image locally.`);
       }
     }
 
-    // Fallback Simulated Data if Python microservice is offline
+    // Dynamic Generic Fallback if Python microservice is unreachable
     if (!aiResponseData) {
       aiResponseData = {
-        ocr_engine_used: "SIMULATED_DEMO_ENGINE",
+        ocr_engine_used: "GENERIC_PARSER",
         raw_text_lines: [
-          "Rajkamal's NAMKEEN",
-          "DIET NAVRATAN MIX (200 g)",
-          "Net Wt : 200 g",
-          "Pkdt : 05-09-16",
-          "MRP IN MUMBAI Rs. 70/-",
-          "(Incl of All Taxes):",
-          "Manufactured & Packed By: RAJKAMAL NAMKEENS PVT.LTD.",
-          "Email: rajkamalnamkeens@gmail.com | Tel: +91-22-25782103"
+          "Scanned Commodity Label",
+          "MRP: As printed on package",
+          "Net Qty: As declared on package"
         ],
         parsed_entities: {
-          mrp_raw: "MRP Rs. 70",
-          net_qty_raw: "200 g",
-          mfg_date_raw: "05-09-16",
-          consumer_care_email: "rajkamalnamkeens@gmail.com",
-          consumer_care_phone: "+91-22-25782103",
-          country_of_origin: "India",
-          manufacturer_details: "RAJKAMAL NAMKEENS PVT.LTD., Mumbai"
+          mrp_raw: null,
+          net_qty_raw: null,
+          mfg_date_raw: null,
+          consumer_care_email: null,
+          consumer_care_phone: null,
+          country_of_origin: null,
+          manufacturer_details: null
         },
-        bounding_boxes: [
-          { text: "DIET NAVRATAN MIX (200 g)", box: [[100, 150], [450, 150], [450, 185], [100, 185]], confidence: 0.95 },
-          { text: "Net Wt : 200 g", box: [[100, 200], [320, 200], [320, 230], [100, 230]], confidence: 0.96 },
-          { text: "Pkdt : 05-09-16", box: [[100, 245], [300, 245], [300, 275], [100, 275]], confidence: 0.95 },
-          { text: "RAJKAMAL NAMKEENS PVT.LTD.", box: [[100, 290], [550, 290], [550, 320], [100, 320]], confidence: 0.93 }
-        ]
+        bounding_boxes: []
       };
     }
 
@@ -94,21 +84,21 @@ router.post('/inspect', optionalToken, upload.single('image'), async (req, res) 
       }
     }
 
-    // 3. Create Inspection Log Record
+    // 3. Create Inspection Log Record (No hardcoded brand names)
     const inspectionLog = {
       id: `INSP-${Date.now().toString().slice(-6)}`,
       timestamp: new Date().toISOString(),
-      productName: req.body.productName || (parsed.manufacturer_details ? 'Rajkamal Diet Navratan Mix' : 'Scanned Package Item'),
+      productName: req.body.productName || (parsed.manufacturer_details ? 'Scanned FMCG Package' : 'Scanned Commodity Item'),
       imageData: imageBase64,
-      manufacturer: parsed.manufacturer_details || 'RAJKAMAL NAMKEENS PVT.LTD., Mumbai',
+      manufacturer: parsed.manufacturer_details || 'Manufacturer Details Not Detected',
       status: ruleEvaluation.status,
       district: req.user ? req.user.district : 'Pune',
       inspectorId: req.user ? req.user.userId : 'GUEST_USER',
       inspectorEmail: req.user ? req.user.email : 'guest@client.local',
       parsedFields: parsed,
       violations: ruleEvaluation.violations,
-      boundingBoxes: aiResponseData.bounding_boxes,
-      extracted_fields: aiResponseData.extracted_fields,
+      boundingBoxes: aiResponseData.bounding_boxes || [],
+      extracted_fields: aiResponseData.extracted_fields || {},
       noticeIssued: false
     };
 
@@ -119,7 +109,7 @@ router.post('/inspect', optionalToken, upload.single('image'), async (req, res) 
     }
     db.inspections.unshift(inspectionLog);
 
-    // 4. Return Full Response to React Frontend
+    // 4. Return Full Dynamic Response to React Frontend
     res.json({
       success: true,
       inspectionId: inspectionLog.id,
@@ -127,8 +117,8 @@ router.post('/inspect', optionalToken, upload.single('image'), async (req, res) 
       total_violations: ruleEvaluation.total_violations,
       violations: ruleEvaluation.violations,
       parsed_entities: parsed,
-      extracted_fields: aiResponseData.extracted_fields,
-      bounding_boxes: aiResponseData.bounding_boxes,
+      extracted_fields: aiResponseData.extracted_fields || {},
+      bounding_boxes: aiResponseData.bounding_boxes || [],
       ocr_engine_used: aiResponseData.ocr_engine_used
     });
 

@@ -96,7 +96,7 @@ def calculate_distance(box1, box2):
         return 9999.0
 
 # -------------------------------------------------------------
-# CORE SPATIAL PROXIMITY & STATUTORY COMPLIANCE ENGINE
+# PURELY DYNAMIC SPATIAL PROXIMITY & STATUTORY COMPLIANCE ENGINE
 # -------------------------------------------------------------
 def process_spatial_label_pipeline(original_img, sharpened_img, img_bytes):
     all_extracted_blocks = []
@@ -153,18 +153,18 @@ def process_spatial_label_pipeline(original_img, sharpened_img, img_bytes):
     raw_lines = [item["text"] for item in all_extracted_blocks]
     full_text = "\n".join(raw_lines)
 
-    # 3. LEGAL METROLOGY KEYWORD ANCHORS DEFINITION
+    # 3. GENERIC METROLOGY KEYWORD ANCHORS (NO HARDCODED BRANDS)
     keyword_anchors = {
-        "Manufacturer_Identity": [r'manufactured\s*&\s*packed\s*by', r'mfd\s*by', r'manufactured\s*by', r'packed\s*by', r'mkt\s*by', r'marketed\s*by', r'pvt\s*ltd', r'rajkamal'],
-        "Generic_Name": [r'diet\s*navratan', r'navratan\s*mix', r'commodity', r'product', r'generic\s*name', r'name\s*of\s*commodity', r'mix', r'namkeen', r'chips', r'biscuits'],
-        "Net_Quantity_Raw": [r'net\s*wt', r'net\s*qty', r'net\s*quantity', r'weight', r'net\s*content', r'200\s*g'],
-        "Mfg_Date": [r'pkdt', r'mfg', r'pkd', r'packed', r'date\s*of\s*mfg', r'05-09-16'],
-        "Expiry_Date": [r'best\s*before', r'expiry', r'exp\s*date', r'90\s*days'],
-        "MRP_Value": [r'm\.?r\.?p\.?', r'mrp\s*in\s*mumbai', r'mrp\s*o/s\s*mumbai', r'max\.?\s*retail', r'rs\.?', r'₹', r'70/-', r'75/-'],
+        "Manufacturer_Identity": [r'manufactured\s*&\s*packed\s*by', r'mfd\s*by', r'manufactured\s*by', r'packed\s*by', r'mkt\s*by', r'marketed\s*by', r'pvt\s*ltd', r'limited', r'inc'],
+        "Generic_Name": [r'commodity', r'product', r'generic\s*name', r'name\s*of\s*commodity', r'mix', r'namkeen', r'chips', r'biscuits', r'milk', r'soap', r'tea', r'oil', r'food', r'powder', r'spices', r'juice'],
+        "Net_Quantity_Raw": [r'net\s*wt', r'net\s*qty', r'net\s*quantity', r'weight', r'net\s*content', r'quantity', r'n\.w\.'],
+        "Mfg_Date": [r'pkdt', r'mfg', r'pkd', r'packed', r'date\s*of\s*mfg', r'mfd', r'batch'],
+        "Expiry_Date": [r'best\s*before', r'expiry', r'exp\s*date', r'use\s*by'],
+        "MRP_Value": [r'm\.?r\.?p\.?', r'max\.?\s*retail', r'maximum\s*retail', r'rs\.?', r'₹', r'price'],
         "Tax_Declaration": [r'incl', r'inclusive', r'all\s*taxes'],
-        "Care_Phone": [r'customer\s*care', r'consumer\s*care', r'care\s*no', r'helpline', r'tel'],
-        "Care_Email": [r'email', r'complaint', r'feedback', r'rajkamalnamkeens@gmail.com'],
-        "Country_of_Origin": [r'country\s*of', r'origin', r'made\s*in', r'india'],
+        "Care_Phone": [r'customer\s*care', r'consumer\s*care', r'care\s*no', r'helpline', r'toll\s*free', r'tel', r'phone'],
+        "Care_Email": [r'email', r'complaint', r'feedback', r'care@'],
+        "Country_of_Origin": [r'country\s*of', r'origin', r'made\s*in'],
         "Unit_Sale_Price_Raw": [r'unit\s*sale', r'usp']
     }
 
@@ -244,14 +244,11 @@ def process_spatial_label_pipeline(original_img, sharpened_img, img_bytes):
         if m: extracted_data["Care_Phone"] = m.group(0)
 
     if not extracted_data["Manufacturer_Identity"]:
-        m = re.search(r'(manufactured\s*&\s*packed\s*by[:\.\s]*[A-Za-z0-9\s,\.\-]{5,60}\s*(?:pvt|ltd|limited|private|namkeens))', full_text, re.I)
-        if m: extracted_data["Manufacturer_Identity"] = m.group(0).strip()
-    if not extracted_data["Manufacturer_Identity"]:
-        m = re.search(r'([A-Za-z0-9\s,\.\-]{5,60}\s*(?:Pvt|Ltd|Limited|Private|Industries|Goods|Foods|Namkeens))', full_text, re.I)
+        m = re.search(r'([A-Za-z0-9\s,\.\-]{5,60}\s*(?:Pvt|Ltd|Limited|Private|Industries|Goods|Foods))', full_text, re.I)
         if m: extracted_data["Manufacturer_Identity"] = m.group(1).strip()
 
     if not extracted_data["Generic_Name"]:
-        m = re.search(r'([A-Za-z\s]{3,30}\s*(?:NAVRATAN\s*MIX|MIX|NAMKEEN|CHIPS|BISCUITS|DAL|MILK|SOAP|TEA|OIL|FOOD))', full_text, re.I)
+        m = re.search(r'([A-Za-z\s]{3,30}\s*(?:MIX|NAMKEEN|CHIPS|BISCUITS|DAL|MILK|SOAP|TEA|OIL|FOOD))', full_text, re.I)
         if m: extracted_data["Generic_Name"] = m.group(1).strip()
 
     if extracted_data["Net_Quantity_Raw"]:
