@@ -10,7 +10,7 @@ from pydantic import BaseModel
 
 app = FastAPI(
     title="SIH26034 Legal Metrology AI Microservice",
-    description="Advanced OpenCV Glare Removal + PaddleOCR Spatial Proximity & Statutory Compliance Engine"
+    description="Advanced OpenCV Glare Removal + Dual-Pass PaddleOCR Spatial Proximity Engine"
 )
 
 # Enable CORS for React Frontend & Node.js API Gateway
@@ -33,7 +33,7 @@ try:
         use_angle_cls=True, 
         lang="en",
         show_log=False,
-        det_db_thresh=0.2,
+        det_db_thresh=0.15,
         det_db_unclip_ratio=2.2
     )
     ocr_type = "PADDLE_OCR"
@@ -50,37 +50,39 @@ except Exception as e1:
         ocr_type = "OPENCV_CONTOUR"
 
 # -------------------------------------------------------------
-# ADVANCED OPENCV GLARE & SHADOW NEUTRALIZER
+# ADVANCED DUAL-PASS OPENCV IMAGE PREPROCESSOR
 # -------------------------------------------------------------
-def clean_label_for_ocr(img_bytes: bytes):
-    """Advanced OpenCV Preprocessing to neutralize shadow maps and glossy glare."""
-    nparr = np.frombuffer(img_bytes, np.uint8)
+def preprocess_image_dual(image_bytes: bytes):
+    """Returns both normalized color image and contrast-enhanced image for dual-pass OCR."""
+    nparr = np.frombuffer(image_bytes, np.uint8)
     img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
 
     if img is None:
         raise ValueError("OpenCV could not parse raw image buffer stream bytes.")
 
-    # 1. Local Dynamic Contrast (CLAHE in Lab Color Space)
+    # 1. Adaptive Resizing (Normalize max dimension to 1280px)
+    h, w = img.shape[:2]
+    max_dim = 1280
+    if max(h, w) > max_dim:
+        scale = max_dim / float(max(h, w))
+        new_w, new_h = int(w * scale), int(h * scale)
+        img = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_AREA)
+
+    # 2. Dynamic Local Contrast Enhancement (CLAHE)
     lab = cv2.cvtColor(img, cv2.COLOR_BGR2Lab)
     l_channel, a, b = cv2.split(lab)
     clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(12, 12))
     cl = clahe.apply(l_channel)
-    
     merged_lab = cv2.merge((cl, a, b))
     enhanced_color = cv2.cvtColor(merged_lab, cv2.COLOR_Lab2BGR)
 
-    # 2. Background Subtraction Glare Removal
-    gray = cv2.cvtColor(enhanced_color, cv2.COLOR_BGR2GRAY)
-    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (21, 21))
-    background = cv2.morphologyEx(gray, cv2.MORPH_CLOSE, kernel)
-    to_subtract = cv2.addWeighted(background, 1, gray, -1, 0)
-    glare_free_gray = cv2.bitwise_not(to_subtract)
-
     # 3. Sharpen Font Outlines
-    gaussian_blur = cv2.GaussianBlur(glare_free_gray, (0, 0), 3)
-    sharpened = cv2.addWeighted(glare_free_gray, 1.8, gaussian_blur, -0.8, 0)
+    gray = cv2.cvtColor(enhanced_color, cv2.COLOR_BGR2GRAY)
+    gaussian_blur = cv2.GaussianBlur(gray, (0, 0), 3)
+    sharpened = cv2.addWeighted(gray, 1.8, gaussian_blur, -0.8, 0)
+    sharpened_rgb = cv2.cvtColor(sharpened, cv2.COLOR_GRAY2RGB)
 
-    return cv2.cvtColor(sharpened, cv2.COLOR_GRAY2RGB)
+    return img, sharpened_rgb
 
 def calculate_distance(box1, box2):
     """Computes Euclidean distance between the center points of two tracking bounding boxes."""
@@ -96,44 +98,56 @@ def calculate_distance(box1, box2):
 # -------------------------------------------------------------
 # CORE SPATIAL PROXIMITY & STATUTORY COMPLIANCE ENGINE
 # -------------------------------------------------------------
-def process_spatial_label_pipeline(sanitized_img, img_bytes):
+def process_spatial_label_pipeline(original_img, sharpened_img, img_bytes):
     all_extracted_blocks = []
-    
-    # 1. OCR EXECUTION & UNIVERSAL UNPACKING LAYER
-    if ocr_type == "PADDLE_OCR" and ocr_engine:
-        try:
-            result = ocr_engine.ocr(sanitized_img, cls=True)
-            if isinstance(result, list):
-                for block in result:
-                    if not block: continue
-                    for line in block:
-                        try:
-                            if isinstance(line, (list, tuple)) and len(line) == 2:
-                                box_coordinates = line[0]
-                                text_data_tuple = line[1]
-                                text_str = str(text_data_tuple[0]).strip() if isinstance(text_data_tuple, (list, tuple)) else str(text_data_tuple).strip()
-                                all_extracted_blocks.append({"box": box_coordinates, "text": text_str})
-                        except Exception as e:
-                            continue
-            elif isinstance(result, dict):
-                inner_res = result.get('res', result)
-                rec_texts = inner_res.get('rec_texts', inner_res.get('texts', []))
-                dt_polys = inner_res.get('dt_polys', [])
-                for idx, txt in enumerate(rec_texts):
-                    if idx < len(dt_polys):
-                        all_extracted_blocks.append({"box": dt_polys[idx], "text": str(txt).strip()})
-        except Exception as e:
-            print(f"PaddleOCR runtime error ({e})")
+    seen_texts = set()
 
-    elif ocr_type == "EASY_OCR" and ocr_engine:
-        try:
-            ocr_res = ocr_engine.readtext(sanitized_img)
-            for bbox, text, conf in ocr_res:
-                if conf > 0.20 and len(text.strip()) > 0:
-                    coords = [[int(pt[0]), int(pt[1])] for pt in bbox]
-                    all_extracted_blocks.append({"box": coords, "text": str(text).strip()})
-        except Exception as e:
-            print(f"EasyOCR runtime error ({e})")
+    def run_ocr_on_image(target_img):
+        if ocr_type == "PADDLE_OCR" and ocr_engine:
+            try:
+                result = ocr_engine.ocr(target_img, cls=True)
+                if isinstance(result, list):
+                    for block in result:
+                        if not block: continue
+                        for line in block:
+                            try:
+                                if isinstance(line, (list, tuple)) and len(line) == 2:
+                                    box_coordinates = line[0]
+                                    text_data_tuple = line[1]
+                                    text_str = str(text_data_tuple[0]).strip() if isinstance(text_data_tuple, (list, tuple)) else str(text_data_tuple).strip()
+                                    if text_str and text_str.lower() not in seen_texts:
+                                        seen_texts.add(text_str.lower())
+                                        all_extracted_blocks.append({"box": box_coordinates, "text": text_str})
+                            except Exception as e:
+                                continue
+                elif isinstance(result, dict):
+                    inner_res = result.get('res', result)
+                    rec_texts = inner_res.get('rec_texts', inner_res.get('texts', []))
+                    dt_polys = inner_res.get('dt_polys', [])
+                    for idx, txt in enumerate(rec_texts):
+                        txt_str = str(txt).strip()
+                        if idx < len(dt_polys) and txt_str and txt_str.lower() not in seen_texts:
+                            seen_texts.add(txt_str.lower())
+                            all_extracted_blocks.append({"box": dt_polys[idx], "text": txt_str})
+            except Exception as e:
+                print(f"PaddleOCR runtime error ({e})")
+
+        elif ocr_type == "EASY_OCR" and ocr_engine:
+            try:
+                ocr_res = ocr_engine.readtext(target_img)
+                for bbox, text, conf in ocr_res:
+                    txt_str = str(text).strip()
+                    if conf > 0.15 and len(txt_str) > 0 and txt_str.lower() not in seen_texts:
+                        seen_texts.add(txt_str.lower())
+                        coords = [[int(pt[0]), int(pt[1])] for pt in bbox]
+                        all_extracted_blocks.append({"box": coords, "text": txt_str})
+            except Exception as e:
+                print(f"EasyOCR runtime error ({e})")
+
+    # Pass 1: Run OCR on Original Resized Image
+    run_ocr_on_image(original_img)
+    # Pass 2: Run OCR on CLAHE Sharpened Image (captures low contrast text)
+    run_ocr_on_image(sharpened_img)
 
     # 2. RAW TEXT DUMP
     raw_lines = [item["text"] for item in all_extracted_blocks]
@@ -141,16 +155,16 @@ def process_spatial_label_pipeline(sanitized_img, img_bytes):
 
     # 3. LEGAL METROLOGY KEYWORD ANCHORS DEFINITION
     keyword_anchors = {
-        "Manufacturer_Identity": [r'mfd\s*by', r'manufactured\s*by', r'packed\s*by', r'mkt\s*by', r'marketed\s*by', r'manufactured\s*&'],
-        "Generic_Name": [r'commodity', r'product', r'generic\s*name', r'name\s*of\s*commodity', r'mix', r'namkeen', r'chips', r'biscuits'],
-        "Net_Quantity_Raw": [r'net\s*wt', r'net\s*qty', r'net\s*quantity', r'weight', r'net\s*content'],
-        "Mfg_Date": [r'mfg', r'pkd', r'pkdt', r'pack', r'packed', r'date\s*of\s*mfg'],
-        "Expiry_Date": [r'best\s*before', r'expiry', r'exp\s*date'],
-        "MRP_Value": [r'm\.?r\.?p\.?', r'max\.?\s*retail', r'maximum\s*retail', r'rs\.?', r'₹'],
+        "Manufacturer_Identity": [r'mfd\s*by', r'manufactured\s*by', r'packed\s*by', r'mkt\s*by', r'marketed\s*by', r'manufactured\s*&', r'mfg\s*by', r'pvt\s*ltd', r'limited'],
+        "Generic_Name": [r'commodity', r'product', r'generic\s*name', r'name\s*of\s*commodity', r'mix', r'namkeen', r'chips', r'biscuits', r'milk', r'soap', r'tea', r'oil', r'food'],
+        "Net_Quantity_Raw": [r'net\s*wt', r'net\s*qty', r'net\s*quantity', r'weight', r'net\s*content', r'quantity', r'n\.w\.'],
+        "Mfg_Date": [r'mfg', r'pkd', r'pkdt', r'pack', r'packed', r'date\s*of\s*mfg', r'mfd'],
+        "Expiry_Date": [r'best\s*before', r'expiry', r'exp\s*date', r'use\s*by'],
+        "MRP_Value": [r'm\.?r\.?p\.?', r'max\.?\s*retail', r'maximum\s*retail', r'rs\.?', r'₹', r'price'],
         "Tax_Declaration": [r'incl', r'inclusive', r'all\s*taxes'],
-        "Care_Phone": [r'customer\s*care', r'consumer\s*care', r'care\s*no', r'helpline'],
-        "Care_Email": [r'email', r'complaint', r'feedback'],
-        "Country_of_Origin": [r'country\s*of', r'origin', r'made\s*in'],
+        "Care_Phone": [r'customer\s*care', r'consumer\s*care', r'care\s*no', r'helpline', r'toll\s*free', r'tel'],
+        "Care_Email": [r'email', r'complaint', r'feedback', r'care@'],
+        "Country_of_Origin": [r'country\s*of', r'origin', r'made\s*in', r'india'],
         "Unit_Sale_Price_Raw": [r'unit\s*sale', r'usp']
     }
 
@@ -167,8 +181,8 @@ def process_spatial_label_pipeline(sanitized_img, img_bytes):
                     m = re.search(r'(\d+(?:\.\d+)?\s*(?:kg|g|gms|ml|l|n|units|pcs))', block_text, re.I)
                     if m: extracted_data[field] = m.group(1); continue
                 elif field == "MRP_Value":
-                    m = re.search(r'([\d,]+)(?:\s*/-)?', block_text, re.I)
-                    if m and not m.group(1).startswith('115'):
+                    m = re.search(r'([\d,]+(?:\.\d{1,2})?)(?:\s*/-)?', block_text, re.I)
+                    if m and not m.group(1).startswith('115') and len(m.group(1)) <= 6:
                         extracted_data[field] = m.group(1); continue
                         
                 anchor_block = block
@@ -192,7 +206,7 @@ def process_spatial_label_pipeline(sanitized_img, img_bytes):
                 
                 dist = np.sqrt((center1_x - center2_x)**2 + (center1_y - center2_y)**2)
                 
-                if dist < min_distance and dist < 450: 
+                if dist < min_distance and dist < 550: 
                     min_distance = dist
                     nearest_block = candidate
                     
@@ -201,19 +215,38 @@ def process_spatial_label_pipeline(sanitized_img, img_bytes):
 
     # 5. REGEX FALLBACK MATCHING IF SPATIAL PROXIMITY ENGINE SLIPS
     if not extracted_data["Net_Quantity_Raw"]:
-        m = re.search(r'(?:net\s*(?:wt|qty|quantity)?.*?)\s*(\d+(?:\.\d+)?\s*(?:kg|g|gms|ml|l|n))\b', full_text, re.I)
+        m = re.search(r'(\d+(?:\.\d+)?\s*(?:kg|g|gms|ml|l|ltr|litres?|n))\b', full_text, re.I)
         if m: extracted_data["Net_Quantity_Raw"] = m.group(1)
         
     if not extracted_data["MRP_Value"]:
-        m = re.search(r'(?:m\.?r\.?p\.?.*?rs\.?)\s*([\d,]+)', full_text, re.I)
+        m = re.search(r'(?:m\.?r\.?p\.?|max\.?\s*retail|price|rs\.?|₹)\s*[:\.\-]?\s*([\₹\Rs\.]*\s*\d+([\,\.]\d{1,2})?)', full_text, re.I)
+        if m: extracted_data["MRP_Value"] = m.group(1)
+    if not extracted_data["MRP_Value"]:
+        m = re.search(r'(\d+([\,\.]\d{1,2})?)\s*(\/\-)', full_text)
         if m: extracted_data["MRP_Value"] = m.group(1)
 
+    if not extracted_data["Mfg_Date"]:
+        m = re.search(r'(\d{2}[/\-\.]\d{2,4}|\w{3,9}\s*\d{2,4})', full_text)
+        if m: extracted_data["Mfg_Date"] = m.group(1)
+
+    if not extracted_data["Care_Email"]:
+        m = re.search(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', full_text)
+        if m: extracted_data["Care_Email"] = m.group(0)
+
+    if not extracted_data["Care_Phone"]:
+        m = re.search(r'(1800\d{6,7}|\+?91[\-\s]?\d{10}|\d{3,5}[\-\s]?\d{6,8})', full_text)
+        if m: extracted_data["Care_Phone"] = m.group(0)
+
+    if not extracted_data["Manufacturer_Identity"]:
+        m = re.search(r'([A-Za-z0-9\s,\.\-]{5,60}\s*(?:Pvt|Ltd|Limited|Private|Industries|Goods|Foods))', full_text, re.I)
+        if m: extracted_data["Manufacturer_Identity"] = m.group(1).strip()
+
     if extracted_data["Net_Quantity_Raw"]:
-        m = re.search(r'(\d+(?:\.\d+)?\s*(?:kg|g|gms|ml|l|n|units|pcs))', str(extracted_data["Net_Quantity_Raw"]), re.I)
+        m = re.search(r'(\d+(?:\.\d+)?\s*(?:kg|g|gms|ml|l|ltr|litres?|n|units|pcs))', str(extracted_data["Net_Quantity_Raw"]), re.I)
         extracted_data["Net_Quantity_Raw"] = m.group(1) if m else None
         
     if extracted_data["MRP_Value"]:
-        m = re.search(r'([\d,]+)', str(extracted_data["MRP_Value"]))
+        m = re.search(r'([\d,]+(?:\.\d{1,2})?)', str(extracted_data["MRP_Value"]))
         extracted_data["MRP_Value"] = m.group(1) if m else None
 
     tax_match = re.search(r'(incl|inclusive|all\s*taxes)', full_text, re.I)
@@ -227,7 +260,7 @@ def process_spatial_label_pipeline(sanitized_img, img_bytes):
         compliance_report["flags"].append("VIOLATION [Rule 6(1)(a)]: Complete postal name/address of the Manufacturer/Packer/Importer is missing.")
           
     if not extracted_data.get("Generic_Name"):
-        fallback_name = re.search(r'\b([A-Za-z\s]{3,30}\s*(?:MIX|NAMKEEN|CHIPS|BISCUITS|DAL|MILK|SOAP))\b', full_text, re.I)
+        fallback_name = re.search(r'\b([A-Za-z\s]{3,30}\s*(?:MIX|NAMKEEN|CHIPS|BISCUITS|DAL|MILK|SOAP|TEA|OIL|FOOD))\b', full_text, re.I)
         if fallback_name:
             extracted_data["Generic_Name"] = fallback_name.group(1).strip()
         else:
@@ -261,7 +294,7 @@ def process_spatial_label_pipeline(sanitized_img, img_bytes):
         try:
             mrp_val = float(str(extracted_data["MRP_Value"]).replace(",", ""))
             qty_num = float(re.search(r'([\d\.]+)', str(extracted_data["Net_Quantity_Raw"])).group(1))
-            qty_unit = re.search(r'(kg|g|gms|ml|l|n|units|pcs)', str(extracted_data["Net_Quantity_Raw"]), re.I).group(1).lower()
+            qty_unit = re.search(r'(kg|g|gms|ml|l|ltr|litres?|n|units|pcs)', str(extracted_data["Net_Quantity_Raw"]), re.I).group(1).lower()
             
             if (qty_unit in ['kg', 'l'] and qty_num == 1.0) or (qty_unit in ['g', 'ml'] and qty_num == 1000.0):
                 is_usp_exempt = True
@@ -320,11 +353,11 @@ async def extract_and_parse(file: UploadFile = File(...)):
     image_bytes = await file.read()
     
     try:
-        sanitized_img = clean_label_for_ocr(image_bytes)
+        original_img, sharpened_img = preprocess_image_dual(image_bytes)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Image preprocessing failed: {str(e)}")
         
-    return process_spatial_label_pipeline(sanitized_img, image_bytes)
+    return process_spatial_label_pipeline(original_img, sharpened_img, image_bytes)
 
 @app.post("/api/process-label")
 async def process_label(file: UploadFile = File(...)):
