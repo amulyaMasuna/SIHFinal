@@ -32,8 +32,11 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess }) {
       if (isRegister) {
         // Register API Call
         const res = await api.post('/auth/register', formData);
-        setMsg(res.data.message || 'Registration successful!');
-        setTimeout(() => setIsRegister(false), 1500);
+        setMsg(res.data.message || 'Registration successful! You can now log in.');
+        setTimeout(() => {
+          setIsRegister(false);
+          setMsg('');
+        }, 2000);
       } else {
         // Login API Call
         const res = await api.post('/auth/login', {
@@ -49,7 +52,9 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess }) {
         onClose();
       }
     } catch (err) {
-      setError(err.response?.data?.error || 'Authentication request failed.');
+      console.error('Auth Error:', err);
+      const serverErrMsg = err.response?.data?.error || err.message || 'Authentication request failed.';
+      setError(serverErrMsg);
     } finally {
       setLoading(false);
     }
@@ -75,14 +80,14 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess }) {
         </p>
 
         {error && (
-          <div class="mb-4 p-3 bg-red-950/60 border border-red-800 text-red-300 text-xs rounded-lg">
-            {error}
+          <div class="mb-4 p-3 bg-red-950/60 border border-red-800 text-red-300 text-xs rounded-lg break-words">
+            ⚠️ {error}
           </div>
         )}
 
         {msg && (
           <div class="mb-4 p-3 bg-emerald-950/60 border border-emerald-800 text-emerald-300 text-xs rounded-lg">
-            {msg}
+            ✓ {msg}
           </div>
         )}
 
@@ -97,7 +102,7 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess }) {
                 onChange={handleChange}
                 required
                 class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-blue-500"
-                placeholder="e.g. Dr. V. K. Patil"
+                placeholder="e.g. Priya Sharma"
               />
             </div>
           )}
@@ -113,7 +118,7 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess }) {
               onChange={handleChange}
               required
               class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-blue-500"
-              placeholder="e.g. officer@nic.in"
+              placeholder={isRegister && formData.role === 'LEGAL_METROLOGY_OFFICER' ? 'e.g. officer@nic.in' : 'e.g. user@example.com'}
             />
           </div>
 
@@ -174,14 +179,14 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess }) {
           {isRegister ? (
             <p>
               Already have an account?{' '}
-              <button onClick={() => setIsRegister(false)} class="text-blue-400 font-semibold underline">
+              <button onClick={() => { setIsRegister(false); setError(''); }} class="text-blue-400 font-semibold underline">
                 Log in here
               </button>
             </p>
           ) : (
             <p>
               Don't have an account?{' '}
-              <button onClick={() => setIsRegister(true)} class="text-blue-400 font-semibold underline">
+              <button onClick={() => { setIsRegister(true); setError(''); }} class="text-blue-400 font-semibold underline">
                 Register new account
               </button>
             </p>
